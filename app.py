@@ -20,7 +20,10 @@ app = Flask(__name__)
 CORS(app)
 
 # Configuration - can be overridden with environment variables
-DOWNLOAD_FOLDER = os.environ.get('TUBEGRAB_DOWNLOAD_FOLDER', '/Users/pvhkr/Personal/Videos')
+# Default to a "downloads" directory inside the project (writable on Render)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_DOWNLOAD_FOLDER = os.path.join(BASE_DIR, 'downloads')
+DOWNLOAD_FOLDER = os.environ.get('TUBEGRAB_DOWNLOAD_FOLDER', DEFAULT_DOWNLOAD_FOLDER)
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 # Auto-detect ffmpeg location
