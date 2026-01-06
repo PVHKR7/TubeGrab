@@ -658,6 +658,43 @@ body {
     margin-top: auto;
 }
 
+/* Cookies upload helper */
+.cookies-upload {
+    margin-top: 0.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.upload-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.65rem 0.9rem;
+    background: var(--bg-secondary);
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition-normal);
+}
+
+.upload-label:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+
+.cookies-status {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.cookies-status.success {
+    color: var(--accent-primary);
+}
+
 /* Utility Classes */
 .hidden {
     display: none !important;

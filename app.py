@@ -26,14 +26,19 @@ DEFAULT_DOWNLOAD_FOLDER = os.path.join(BASE_DIR, 'downloads')
 DOWNLOAD_FOLDER = os.environ.get('TUBEGRAB_DOWNLOAD_FOLDER', DEFAULT_DOWNLOAD_FOLDER)
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
+# Cookies upload directory (for user-provided cookies.txt)
+COOKIES_FOLDER = os.path.join(BASE_DIR, 'cookies')
+os.makedirs(COOKIES_FOLDER, exist_ok=True)
+
 # Auto-detect ffmpeg location
 FFMPEG_PATH = os.environ.get('FFMPEG_PATH', shutil.which('ffmpeg') or 'ffmpeg')
 
 # Track download progress
 downloads = {}
+cookies_store = {}
 
 
-def get_video_info(url):
+def get_video_info(url, cookies_path=None):
     """Get video information without downloading"""
     ydl_opts = {
         'quiet': True,
@@ -49,6 +54,10 @@ def get_video_info(url):
             }
         },
     }
+    
+    if cookies_path:
+        # Use user-provided cookies to satisfy login/age checks
+        ydl_opts['cookiefile'] = cookies_path
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -70,6 +79,8 @@ def get_video_info(url):
             'nocheckcertificate': True,
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
+        if cookies_path:
+            ydl_opts_fallback['cookiefile'] = cookies_path
         with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl:
             info = ydl.extract_info(url, download=False)
             return {
@@ -137,7 +148,7 @@ def convert_to_mp4(input_file, download_id):
     return input_file  # Return original if conversion failed
 
 
-def download_video(url, download_id):
+def download_video(url, download_id, cookies_path=None):
     """Download video using yt-dlp command line (works better for JS challenges)"""
     try:
         downloads[download_id]['status'] = 'downloading'
@@ -164,6 +175,21 @@ def download_video(url, download_id):
             '--restrict-filenames',  # Ensure safe filenames
             url
         ]
+
+        # If user supplied cookies.txt, prefer it over cookies-from-browser
+        if cookies_path:
+            cmd = [
+                'yt-dlp',
+                '--no-check-certificate',
+                '--cookies', cookies_path,
+                '-o', output_template,
+                '--newline',
+                '--remote-components', 'ejs:github',
+                '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                '--no-overwrites',
+                '--restrict-filenames',
+                url
+            ]
         
         # Add ffmpeg location if available
         if ffmpeg_dir:
@@ -279,12 +305,15 @@ def video_info():
     """Get video information"""
     data = request.get_json()
     url = data.get('url', '')
+    cookies_token = data.get('cookies_token')
     
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
     
+    cookies_path = cookies_store.get(cookies_token) if cookies_token else None
+    
     try:
-        info = get_video_info(url)
+        info = get_video_info(url, cookies_path=cookies_path)
         return jsonify(info)
     except Exception as e:
         return jsonify({'error': str(e)}), 400
@@ -295,9 +324,12 @@ def start_download():
     """Start a video download"""
     data = request.get_json()
     url = data.get('url', '')
+    cookies_token = data.get('cookies_token')
     
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
+    
+    cookies_path = cookies_store.get(cookies_token) if cookies_token else None
     
     download_id = str(uuid.uuid4())[:8]
     downloads[download_id] = {
@@ -305,11 +337,12 @@ def start_download():
         'progress': 0,
         'url': url,
         'error': None,
-        'filename': None
+        'filename': None,
+        'cookies_token': cookies_token if cookies_path else None
     }
     
     # Start download in background thread
-    thread = threading.Thread(target=download_video, args=(url, download_id))
+    thread = threading.Thread(target=download_video, args=(url, download_id, cookies_path))
     thread.daemon = True
     thread.start()
     
@@ -359,6 +392,29 @@ def get_file(download_id):
     )
 
 
+@app.route('/api/cookies', methods=['POST'])
+def upload_cookies():
+    """
+    Accept a cookies.txt file upload and return a token.
+    Caller must send multipart/form-data with field name 'cookies'.
+    """
+    if 'cookies' not in request.files:
+        return jsonify({'error': 'No cookies file uploaded'}), 400
+    
+    file = request.files['cookies']
+    if file.filename == '':
+        return jsonify({'error': 'Empty filename'}), 400
+    
+    cookies_id = str(uuid.uuid4())
+    cookies_path = os.path.join(COOKIES_FOLDER, f'{cookies_id}.txt')
+    file.save(cookies_path)
+    
+    # Keep track so we can reuse for this session/download
+    cookies_store[cookies_id] = cookies_path
+    
+    return jsonify({'cookies_token': cookies_id})
+
+
 @app.route('/api/cleanup/<download_id>', methods=['DELETE'])
 def cleanup(download_id):
     """Clean up downloaded file"""
@@ -369,6 +425,15 @@ def cleanup(download_id):
                 os.remove(filename)
             except:
                 pass
+        # Remove uploaded cookies if they were used for this download
+        cookies_token = downloads[download_id].get('cookies_token')
+        if cookies_token:
+            cookies_path = cookies_store.pop(cookies_token, None)
+            if cookies_path and os.path.exists(cookies_path):
+                try:
+                    os.remove(cookies_path)
+                except:
+                    pass
         del downloads[download_id]
     
     return jsonify({'success': True})

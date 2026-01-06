@@ -7,6 +7,7 @@ class YouTubeDownloader {
     constructor() {
         this.currentDownloadId = null;
         this.progressInterval = null;
+        this.cookiesToken = null;
         
         // DOM Elements
         this.urlInput = document.getElementById('urlInput');
@@ -19,6 +20,8 @@ class YouTubeDownloader {
         this.saveFileBtn = document.getElementById('saveFileBtn');
         this.newDownloadBtn = document.getElementById('newDownloadBtn');
         this.retryBtn = document.getElementById('retryBtn');
+        this.cookiesFileInput = document.getElementById('cookiesFile');
+        this.cookiesStatus = document.getElementById('cookiesStatus');
         
         this.init();
     }
@@ -30,6 +33,9 @@ class YouTubeDownloader {
         this.saveFileBtn.addEventListener('click', () => this.saveFile());
         this.newDownloadBtn.addEventListener('click', () => this.reset());
         this.retryBtn.addEventListener('click', () => this.reset());
+        if (this.cookiesFileInput) {
+            this.cookiesFileInput.addEventListener('change', (e) => this.uploadCookies(e));
+        }
         
         // Enter key support
         this.urlInput.addEventListener('keypress', (e) => {
@@ -62,7 +68,10 @@ class YouTubeDownloader {
             const response = await fetch('/api/info', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
+                body: JSON.stringify({ 
+                    url,
+                    cookies_token: this.cookiesToken || undefined
+                })
             });
             
             const data = await response.json();
@@ -174,7 +183,10 @@ class YouTubeDownloader {
             const response = await fetch('/api/download', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
+                body: JSON.stringify({ 
+                    url,
+                    cookies_token: this.cookiesToken || undefined
+                })
             });
             
             const data = await response.json();
@@ -298,6 +310,10 @@ class YouTubeDownloader {
         if (this.currentDownloadId) {
             fetch(`/api/cleanup/${this.currentDownloadId}`, { method: 'DELETE' })
                 .catch(() => {});
+            
+            // Cookies file is cleaned on the server; clear token locally
+            this.cookiesToken = null;
+            this.setCookiesStatus('Cookies cleared. Re-upload if needed.', false);
         }
         
         this.stopProgressPolling();
@@ -326,6 +342,47 @@ class YouTubeDownloader {
             btnText.textContent = 'Loading...';
         } else {
             btnText.textContent = 'Fetch';
+        }
+    }
+
+    async uploadCookies(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        this.setCookiesStatus('Uploading cookies...', false);
+        const formData = new FormData();
+        formData.append('cookies', file);
+        
+        try {
+            const response = await fetch('/api/cookies', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to upload cookies');
+            }
+            
+            this.cookiesToken = data.cookies_token;
+            this.setCookiesStatus('Cookies uploaded. They will be used for fetch/download.', true);
+        } catch (error) {
+            this.cookiesToken = null;
+            this.setCookiesStatus('Cookies upload failed. Please try again.', false);
+            this.showError(error.message);
+        } finally {
+            // Allow re-selecting the same file
+            event.target.value = '';
+        }
+    }
+
+    setCookiesStatus(message, success) {
+        if (!this.cookiesStatus) return;
+        this.cookiesStatus.textContent = message;
+        if (success) {
+            this.cookiesStatus.classList.add('success');
+        } else {
+            this.cookiesStatus.classList.remove('success');
         }
     }
 }
